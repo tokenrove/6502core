@@ -1,0 +1,6 @@
+
+The original 6502asm.pl was eaten by ext2fs due to an inopportune
+power-outage. I have plans to extend the existing one to allow
+other syntaxes (and processors), at which point it will move to
+its own module in CVS.
+
