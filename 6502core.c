@@ -7,11 +7,12 @@
  *         **Flag-fu could be written in a much better way, however it
  *           it currently patched up from when I did it incorrectly**
  *         SBC (0xE1) and ISB (0xE3) are currently unimplemented
+ *         ARR doesn't do exactly as it should, RTFM
  *
  * Teknovore/1997,1998
  * Julian Squires 1999
  *
- * $Id$
+ * $Id: 6502core.c,v 1.2 1999/08/05 00:46:25 tek Exp $
  *
  */
 
@@ -1237,6 +1238,7 @@ void cpustep(registers_t *registers)
 
 	  setbit(registers->P, 0x80, baz&0x80);
 	  setbit(registers->P, 0x02, (!baz)?0x02:0x00);
+	  setbit(registers->P, 0x40, (baz^registers->A)&64);
 
 	  registers->A = baz&0xFF;
 	  /* Count 2 ticks here */

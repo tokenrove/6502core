@@ -2,16 +2,18 @@
 # 
 # 6502asm.pl
 # Created: Sun Jul 25 13:24:14 1999 by tek@wiw.org
-# Revised: Fri Aug  6 21:21:42 1999 by tek@wiw.org
+# Revised: Sat Aug  7 19:18:38 1999 by tek@wiw.org
 # Copyright 1999 Julian E. C. Squires (tek@wiw.org)
 # This program comes with ABSOLUTELY NO WARRANTY.
-# $Id: 6502asm.pl,v 1.2 1999/08/06 23:36:48 tek Exp $
+# $Id: 6502asm.pl,v 1.3 1999/08/06 23:54:00 tek Exp $
 #
 # Wishlist:
 #   proper handling of labels for zeropage fu?
 #   handling of non-hex addresses... (such as -42 for relative, etc)
 #   fix hex idiocy... also, endian of addresses?
 #   checking for bad values
+#   support for seg, org, etc.
+#   DASM compatability mode
 #   Z80 support
 #
 # Hacknote: relative ops (like BCC) currently want the same op in
@@ -66,6 +68,7 @@ my %optable =
     LDX => [ 0xA2, 0xAE, 0xA6, -1, -1, -1, -1, -1, 0xBE, -1, -1, 0xB6 ],
     LDY => [ 0xA0, 0xAC, 0xA4, -1, -1, -1, 0xB4, 0xBC, -1, -1, -1, -1 ],
     LSR => [ -1, 0x4E, 0x46, 0x4A, -1, -1, 0x56, 0x5E, -1, -1, -1, -1 ],
+    # There are _lots_ of other NOPs
     NOP => [ -1, -1, -1, 0xEA, -1, -1, -1, -1, -1, -1, -1, -1 ],
     ORA => [ 0x09, 0x0D, 0x05, -1, 0x01, 0x11, 0x15, 0x1D, 0x19, -1, -1, -1 ],
 
@@ -78,6 +81,7 @@ my %optable =
     ROR => [ -1, 0x6E, 0x66, 0x6A, -1, -1, 0x76, 0x7E, -1, -1, -1, -1 ],
     RTI => [ -1, -1, -1, 0x40, -1, -1, -1, -1, -1, -1, -1, -1 ],
     RTS => [ -1, -1, -1, 0x60, -1, -1, -1, -1, -1, -1, -1, -1 ],
+    # SBC is also 0xEB
     SBC => [ 0xE9, 0xED, 0xE5, -1, 0xE1, 0xF1, 0xF5, 0xFD, 0xF9, -1, -1, -1 ],
     SEC => [ -1, -1, -1, 0x38, -1, -1, -1, -1, -1, -1, -1, -1 ],
 
@@ -101,13 +105,36 @@ my %optable =
     RLA => [ -1, 0x2F, 0x27, -1, 0x23, 0x33, 0x37, 0x3F, 0x3B, -1, -1, -1 ],
     SRE => [ -1, 0x4F, 0x47, -1, 0x43, 0x53, 0x57, 0x5F, 0x5B, -1, -1, -1 ],
     RRA => [ -1, 0x6F, 0x67, -1, 0x63, 0x73, 0x77, 0x7F, 0x7B, -1, -1, -1 ],
-    SAX => [ -1, 0x8F, 0x87, -1, 0x83, 0x93, 0x97, 0x9F, 0x9B, -1, -1, -1 ],
+    SAX => [ -1, 0x8F, 0x87, -1, 0x83, -1, -1, 0x9F, -1, -1, -1, 0x97 ],
 
-    LAX => [ -1, 0xAF, 0xA7, -1, 0xA3, 0xB3, 0xB7, 0xBF, 0xBB, -1, -1, -1 ],
+    LAX => [ -1, 0xAF, 0xA7, -1, 0xA3, 0xB3, -1, 0xBF, 0xBB, -1, -1, 0xB7 ],
     DCP => [ -1, 0xCF, 0xC7, -1, 0xC3, 0xD3, 0xD7, 0xDF, 0xDB, -1, -1, -1 ],
     ISB => [ -1, 0xEF, 0xE7, -1, 0xE3, 0xF3, 0xF7, 0xFF, 0xFB, -1, -1, -1 ],
 
+    ANC => [ 0x0B, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 ], # Also 0x2B
+    ASR => [ 0x4B, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 ],
+    ARR => [ 0x6B, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 ],
+    ANE => [ 0x8B, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 ],
+    LXA => [ 0xAB, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 ],
+    SBX => [ 0xCB, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 ],
+
+    SHA => [ -1, -1, -1, -1, 0x93, -1, -1, -1, 0x9F, -1, -1, -1 ],
+    SHS => [ -1, -1, -1, -1, -1, -1, -1, -1, 0x9B, -1, -1, -1 ],
+    SHX => [ -1, -1, -1, -1, -1, -1, -1, -1, 0x9E, -1, -1, -1 ],
+    SHY => [ -1, -1, -1, -1, -1, -1, -1, 0x9C, -1, -1, -1, -1 ],
+
+    # JAM, HNG, whatever you will... it wedges the machine. There are
+    # a lot more of these.
+    JAM => [ -1, -1, -1, 0x02, -1, -1, -1, -1, -1, -1, -1, -1 ],
   );
+
+my %ascommands = { ORG => { },
+		   LINE => { },
+		   BYTE => { },
+		   DB => { },
+		   WORD => { },
+		   DW => { }
+		 };
 
 my %reserved = ( A => 1, X => 1, Y => 1, S => 1, P => 1, PC => 1 );
 
@@ -139,6 +166,8 @@ while( <> ) {
   $secpass[ $#secpass + 1 ] = $_;
 }
 
+my $tmp;
+
 $line = 0;
 $addr = $org;
 for $_ ( @secpass ) {
@@ -148,6 +177,9 @@ for $_ ( @secpass ) {
     { if( defined( $symtable{ $1 } ) ) { die "$line:$1: Duplicate symbol" }
       print "defined $symbyline{$line}: ".unpack("H*",pack("n",$addr))."\n";
       $symtable{ $symbyline{ $line } } = $addr }
+
+  $tmp = '$'.unpack("H*",pack("n",$addr));
+  s/\*/$tmp/;
 
   print "$line:".unpack("H*",pack("n",$addr)).": $_\n";
 
