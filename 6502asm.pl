@@ -5,14 +5,14 @@
 # Revised: Sat Aug  7 19:18:38 1999 by tek@wiw.org
 # Copyright 1999 Julian E. C. Squires (tek@wiw.org)
 # This program comes with ABSOLUTELY NO WARRANTY.
-# $Id: 6502asm.pl,v 1.4 1999/08/08 03:37:16 tek Exp $
+# $Id: 6502asm.pl,v 1.5 2000/07/10 03:23:47 tek Exp $
 #
 # Wishlist:
+#   extensive test suite
 #   proper handling of labels for zeropage fu?
 #   handling of non-hex addresses... (such as -42 for relative, etc)
 #   fix hex idiocy... also, endian of addresses?
 #   checking for bad values
-#   add arguments
 #   DASM compatability mode
 #   Z80 support
 #
@@ -129,10 +129,7 @@ my %optable =
   );
 
 my %ascommands = ( 'ORG' => 1,
-		   'LINE' => 1,
-		   'BYTE' => 1,
 		   'DB' => 1,
-		   'WORD' => 1,
 		   'DW' => 1
 		 );
 
@@ -140,20 +137,37 @@ my %reserved = ( A => 1, X => 1, Y => 1, S => 1, P => 1, PC => 1 );
 
 my (%symtable, %symbyline);
 my @secpass;
-my ( $line, $addr, $org, $outfile, $infile ) = ( 0, 0, 0x8000, "a.bin", '' );
+my ( $line, $addr, $org, $outfile, $infile ) = ( 0, 0, 0x8000, undef, undef );
+my ( $verbose ) = ( undef );
 
-$infile = $ARGV[0] or die "Insufficient arguments";
+while(scalar(@ARGV)) {
+  $_ = shift @ARGV;
+  if($_ eq '-v') {
+    $verbose = 1;
+  } else {
+    if( defined( $infile ) ) { die "Too many input files. (sorry)\n" }
+    $infile = $_;
+  }
+}
 
-my $in = new IO::File( $infile, "r" ) or die $!;
-if( $infile =~ m/((?=\.s)|(?=\.asm))^/ ) {
+if( !defined( $infile ) ) {
+  die "Insufficient arguments. (you need to specify at least an input file)\n"
+}
+
+my $in = new IO::File( $infile, "r" ) or die "$infile: $!\n";
+if( $infile =~ m/(\.s)|(\.asm)^/ ) {
   $outfile = $infile;
-  $outfile =~ s/$1^/.bin/;
+  $outfile =~ s/(\.s)|(\.asm)$/.bin/;
 } else {
   $outfile = $infile . '.bin';
 }
-my $out = new IO::File( $outfile, "w" ) or die $!;
+my $out = new IO::File( $outfile, "w" ) or die "$outfile: $!\n";
 
-while( $_ = $in->getline() ) {
+my $tmp;
+
+$line = 0;
+$addr = $org;
+PASS1: while( $_ = $in->getline() ) {
   $line++;
 
   # Eat comments
@@ -162,71 +176,65 @@ while( $_ = $in->getline() ) {
   chomp;
 
   if( $_ =~ /^(\w+)(\s+.*)?$/ ) {
-    print "got $1\n";
-
     if( defined( $reserved{ $1 } ) or defined( $optable{ $1 } ) or
         defined( $ascommands{ $1 } ) ) {
-      die "$line:$1: Reserved symbol"
+      die "$line:$1: Reserved symbol\n"
     }
 
     $symbyline{ $line } = $1;
+
+    if( defined( $symtable{ $symbyline{ $line } } ) ) {
+      die "$line:$1: Duplicate symbol\n"
+    }
+
+    if( $verbose == 1 ) {
+      print "defined $symbyline{$line}: ".unpack("H*",pack("n",$addr))."\n"
+    }
+
+    $symtable{ $symbyline{ $line } } = $addr;
+
     $_ =~ s/^(\w+)//
   }
-
-  $secpass[ $#secpass + 1 ] = $_;
-}
-
-my $tmp;
-
-$line = 0;
-$addr = $org;
-PASS1: for $_ ( @secpass ) {
-  $line++;
-
-  if( defined( $symbyline{ $line } ) )
-    { if( defined( $symtable{ $1 } ) ) { die "$line:$1: Duplicate symbol" }
-      print "defined $symbyline{$line}: ".unpack("H*",pack("n",$addr))."\n";
-      $symtable{ $symbyline{ $line } } = $addr }
 
   $tmp = "\$".unpack("H*",pack("n",$addr));
   s/\*/$tmp/;
 
-  print "$line:".unpack("H*",pack("n",$addr)).": $_\n";
-
   # Eat blank lines
-  if( $_ =~ m/^\s*$/ ) { next }
+  if( $_ =~ m/^\s*$/ ) { next PASS1 }
 
-  if( $_ !~ m/^\s*(\w+).*$/ ) { die "$line:$_: parse error" }
+  $secpass[ $#secpass + 1 ] = $_;
+
+  if( $_ !~ m/^\s*(\w+).*$/ ) { die "$line:$_: parse error\n" }
   if( defined( $ascommands{ $1 } ) ) {
     if( $1 eq 'ORG' ) {
-      if( /^\s*(\w+)\s+\$([0-9A-Fa-f]{4}?)\s*$/ ) {
+      if( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,4})\s*$/ ) {
 	$addr = hex( $2 );
       } else {
-	die "$line:$2: bad argument to ORG"
+	die "$line:$2: bad argument to ORG\n"
       }
     }
 
     next PASS1;
   }
-  if( !defined( $optable{ $1 } ) ) { die "$line:$1: bad opcode" }
+  if( !defined( $optable{ $1 } ) ) { die "$line:$1: bad opcode\n" }
 
-  if( /^\s*(\w+)\s+\#\$([0-9A-Fa-f]{2}?)\s*$/ ) { $addr += 2 }
-  elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{4}?)\s*$/ ) { $addr += 3 }
+  if( /^\s*(\w+)\s+\#\$([0-9A-Fa-f]{1,2})\s*$/ ) { $addr += 2 }
+  elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,4})\s*$/ ) { $addr += 3 }
   elsif( /^\s*(\w+)\s+(\w+)\s*$/ ) { $addr += 3 }
-  elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{2}?)\s*$/ ) { $addr += 2 }
+  elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,2})\s*$/ ) { $addr += 2 }
   elsif( /^\s*(\w+)\s*$/ ) { $addr++ }
   elsif( /^\s*(\w+)\s+A\s*$/ ) { $addr++ }
-  elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{4}?)\)\s*$/ ) { $addr += 3 }
+  elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{1,4})\)\s*$/ ) { $addr += 3 }
   elsif( /^\s*(\w+)\s+\((\w+)\)\s*$/ ) { $addr += 3 }
-  elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{4}?)\s*,?\s*X\s*$/ ) { $addr += 3 }
+  elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,4})\s*,?\s*X\s*$/ ) { $addr += 3 }
   elsif( /^\s*(\w+)\s+(\w+)\s*,?\s*X\s*$/ ) { $addr += 3 }
-  elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{4}?)\s*,?\s*Y\s*$/ ) { $addr += 3 }
+  elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,4})\s*,?\s*Y\s*$/ ) { $addr += 3 }
   elsif( /^\s*(\w+)\s+(\w+)\s*,?\s*Y\s*$/ ) { $addr += 3 }
-  elsif( /^\s*(\w+)\s+(\$[0-9A-Fa-f]{2}?)\s*,\s*?X\s*$/ ) { $addr += 2 }
-  elsif( /^\s*(\w+)\s+(\$[0-9A-Fa-f]{2}?)\s*,\s*?Y\s*$/ ) { $addr += 2 }
-  elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{2}?)\s*,?\s*X\)\s*$/ ) { $addr += 2 }
-  elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{2}?)\s*\)\s*,?\s*Y\s*$/ ) { $addr += 2 }
-  else { die "$line: parse error" }
+  elsif( /^\s*(\w+)\s+(\$[0-9A-Fa-f]{1,2})\s*,\s*?X\s*$/ ) { $addr += 2 }
+  elsif( /^\s*(\w+)\s+(\$[0-9A-Fa-f]{1,2})\s*,\s*?Y\s*$/ ) { $addr += 2 }
+  elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{1,2})\s*,?\s*X\)\s*$/ ) { $addr += 2 }
+  elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{1,2})\s*\)\s*,?\s*Y\s*$/ ) { $addr += 2 }
+  else { die "$line: parse error\n" }
 }
 
 $line = 0;
@@ -234,47 +242,48 @@ $addr = $org;
 PASS2: for $_ ( @secpass ) {
   $line++;
 
-  print "$line:".unpack("H*",pack("n",$addr)).": $_\n";
-
-  # Eat blank lines
-  if( $_ =~ m/^\s*$/ ) { next }
-
-  if( $_ !~ m/^\s*(\w+).*$/ ) { die "$line:$_: parse error" }
+  if( $_ !~ m/^\s*(\w+).*$/ ) { die "$line:$_: parse error\n" }
   if( defined( $ascommands{ $1 } ) ) {
-    if( $1 eq 'DB' ) {
-      if( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,2}?)\s*$/ ) {
+    if( $1 eq 'ORG' ) {
+      if( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,4})\s*$/ ) {
+	$addr = hex( $2 );
+      } else {
+	die "$line:$2: bad argument to ORG\n"
+      }
+    } elsif( $1 eq 'DB' ) {
+      if( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,2})\s*$/ ) {
 	$out->print( pack("C*", hex( $2 ) ) );
       } else {
-	die "$line:$2: bad argument to DB"
+	die "$line:$2: bad argument to DB\n"
       }
     } elsif( $1 eq 'DW' ) {
-      if( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,4}?)\s*$/ ) {
+      if( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,4})\s*$/ ) {
 	$out->print( pack("C*", hex( $2 ) ) );
       } else {
-	die "$line:$2: bad argument to DW"
+	die "$line:$2: bad argument to DW\n"
       }
     }
 
     next PASS2;
   }
-  if( !defined( $optable{ $1 } ) ) { die "$line:$1: bad opcode" }
+  if( !defined( $optable{ $1 } ) ) { die "$line:$1: bad opcode\n" }
 
-  if( /^\s*(\w+)\s+\#\$([0-9A-Fa-f]{1,2}?)\s*$/ ) {
+  if( /^\s*(\w+)\s+\#\$([0-9A-Fa-f]{1,2})\s*$/ ) {
     if( $optable{ $1 }[ $opm{ IMMEDIATE } ] == -1 )
-    { die "$line:$1:immediate: bad addressing mode" }
+    { die "$line:$1:immediate: bad addressing mode\n" }
 
     $addr += 2;
     $out->print( chr( $optable{ $1 }[ $opm{ IMMEDIATE } ] ) .
 		 pack("C", hex( $2 ) ) )
 
-  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,4}?)\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,4})\s*$/ ) {
     if( $optable{ $1 }[ $opm{ RELATIVE } ] != -1 ) {
       $_ = pack("C", hex( $2 ) - ( $addr + 1 ) );
       $addr += 2;
 
     } else {
       if( $optable{ $1 }[ $opm{ ABSOLUTE } ] == -1 )
-      { die "$line:$1:absolute: bad addressing mode" }
+      { die "$line:$1:absolute: bad addressing mode\n" }
 
       $_ = pack("v", hex( $2 ) );
       $addr += 3;
@@ -289,7 +298,7 @@ PASS2: for $_ ( @secpass ) {
 
     } else {
       if( $optable{ $1 }[ $opm{ ABSOLUTE } ] == -1 )
-      { die "$line:$1:absolute: bad addressing mode" }
+      { die "$line:$1:absolute: bad addressing mode\n" }
 
       $_ = pack("v", $symtable{ $2 } );
       $addr += 3;
@@ -297,13 +306,13 @@ PASS2: for $_ ( @secpass ) {
 
     $out->print( chr( $optable{ $1 }[ $opm{ ABSOLUTE } ] ) . $_ )
 
-  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,2}?)\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,2})\s*$/ ) {
     if( $optable{ $1 }[ $opm{ RELATIVE } ] != -1 ) {
       $_ = pack("C", hex( $2 ) - ( $addr + 1 ) );
 
     } else {
       if( $optable{ $1 }[ $opm{ ZPAGE } ] == -1 )
-      { die "$line:$1:zero-page: bad addressing mode" }
+      { die "$line:$1:zero-page: bad addressing mode\n" }
 
       $_ = pack("c", hex( $2 ) );
     }
@@ -313,21 +322,21 @@ PASS2: for $_ ( @secpass ) {
 
   } elsif( /^\s*(\w+)\s*$/ ) {
     if( $optable{ $1 }[ $opm{ IMPLIED } ] == -1 )
-    { die "$line:$1:implied: bad addressing mode" }
+    { die "$line:$1:implied: bad addressing mode\n" }
 
     $addr++;
     $out->print( chr( $optable{ $1 }[ $opm{ IMPLIED } ] ) )
 
   } elsif( /^\s*(\w+)\s+A\s*$/ ) {
     if( $optable{ $1 }[ $opm{ IMPLIED } ] == -1 )
-    { die "$line:$1:accumulator: bad addressing mode" }
+    { die "$line:$1:accumulator: bad addressing mode\n" }
 
     $addr++;
     $out->print( chr( $optable{ $1 }[ $opm{ IMPLIED } ] ) )
 
-  } elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{1,4}?)\)\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{1,4})\)\s*$/ ) {
     if( $optable{ $1 }[ $opm{ INDIRECT } ] == -1 )
-    { die "$line:$1:indirect absolute: bad addressing mode" }
+    { die "$line:$1:indirect absolute: bad addressing mode\n" }
 
     $addr += 3;
     $out->print( chr( $optable{ $1 }[ $opm{ INDIRECT } ] ) .
@@ -335,15 +344,15 @@ PASS2: for $_ ( @secpass ) {
 
   } elsif( /^\s*(\w+)\s+\((\w+)\)\s*$/ and defined( $symtable{ $2 } ) ) {
     if( $optable{ $1 }[ $opm{ INDIRECT } ] == -1 )
-    { die "$line:$1:indirect absolute: bad addressing mode" }
+    { die "$line:$1:indirect absolute: bad addressing mode\n" }
 
     $addr += 3;
     $out->print( chr( $optable{ $1 }[ $opm{ INDIRECT } ] ) .
 		 pack("v", $symtable{ $2 } ) )
 
-  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,4}?)\s*,?\s*X\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,4})\s*,?\s*X\s*$/ ) {
     if( $optable{ $1 }[ $opm{ ABSX } ] == -1 )
-    { die "$line:$1:absolute indexed by X: bad addressing mode" }
+    { die "$line:$1:absolute indexed by X: bad addressing mode\n" }
 
     $addr += 3;
     $out->print( chr( $optable{ $1 }[ $opm{ ABSX } ] ) .
@@ -351,15 +360,15 @@ PASS2: for $_ ( @secpass ) {
 
   } elsif( /^\s*(\w+)\s+(\w+)\s*,?\s*X\s*$/ and defined( $symtable{ $2 } ) ) {
     if( $optable{ $1 }[ $opm{ ABSX } ] == -1 )
-    { die "$line:$1:absolute indexed by X: bad addressing mode" }
+    { die "$line:$1:absolute indexed by X: bad addressing mode\n" }
 
     $addr += 3;
     $out->print( chr( $optable{ $1 }[ $opm{ ABSX } ] ) .
 		 pack("v", $symtable{ $2 } ) )
 
-  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,4}?)\s*,?\s*Y\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,4})\s*,?\s*Y\s*$/ ) {
     if( $optable{ $1 }[ $opm{ ABSY } ] == -1 )
-    { die "$line:$1:absolute indexed by Y: bad addressing mode" }
+    { die "$line:$1:absolute indexed by Y: bad addressing mode\n" }
 
     $addr += 3;
     $out->print( chr( $optable{ $1 }[ $opm{ ABSY } ] ) .
@@ -367,45 +376,45 @@ PASS2: for $_ ( @secpass ) {
 
   } elsif( /^\s*(\w+)\s+(\w+)\s*,?\s*Y\s*$/ and defined( $symtable{ $2 } ) ) {
     if( $optable{ $1 }[ $opm{ ABSY } ] == -1 )
-    { die "$line:$1:absolute indexed by Y: bad addressing mode" }
+    { die "$line:$1:absolute indexed by Y: bad addressing mode\n" }
 
     $addr += 3;
     $out->print( chr( $optable{ $1 }[ $opm{ ABSY } ] ) .
 		 pack("v", $symtable{ $2 } ) )
 
-  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,2}?)\s*,\s*?X\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,2})\s*,\s*?X\s*$/ ) {
     if( $optable{ $1 }[ $opm{ ZPAGEX } ] == -1 )
-    { die "$line:$1:zero-page indexed by X: bad addressing mode" }
+    { die "$line:$1:zero-page indexed by X: bad addressing mode\n" }
 
     $addr += 2;
     $out->print( chr( $optable{ $1 }[ $opm{ ZPAGEX } ] ) .
 		 pack("c", hex( $2 ) ) )
 
-  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,2}?)\s*,\s*?Y\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,2})\s*,\s*?Y\s*$/ ) {
     if( $optable{ $1 }[ $opm{ ZPAGEY } ] == -1 )
-    { die "$line:$1:zero-page indexed by Y: bad addressing mode" }
+    { die "$line:$1:zero-page indexed by Y: bad addressing mode\n" }
 
     $addr += 2;
     $out->print( chr( $optable{ $1 }[ $opm{ ZPAGEY } ] ) .
 		 pack("c", hex( $2 ) ) )
 
-  } elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{1,2}?)\s*,?\s*X\)\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{1,2})\s*,?\s*X\)\s*$/ ) {
     if( $optable{ $1 }[ $opm{ INDX } ] == -1 )
-    { die "$line:$1: indexed indirect by X: bad addressing mode" }
+    { die "$line:$1: indexed indirect by X: bad addressing mode\n" }
 
     $addr += 2;
     $out->print( chr( $optable{ $1 }[ $opm{ INDX } ] ) .
 		 pack("v", hex( $2 ) ) )
 
-  } elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{1,2}?)\s*\)\s*,?\s*Y\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{1,2})\s*\)\s*,?\s*Y\s*$/ ) {
     if( $optable{ $1 }[ $opm{ INDY } ] == -1 )
-    { die "$line:$1: indirect indexed by Y: bad addressing mode" }
+    { die "$line:$1: indirect indexed by Y: bad addressing mode\n" }
 
     $addr += 2;
     $out->print( chr( $optable{ $1 }[ $opm{ INDY } ] ) .
 		 pack("v", hex( $2 ) ) )
 
-  } else { die "$line: parse error" }
+  } else { die "$line: parse error\n" }
 }
 
 # EOF 6502asm.pl
