@@ -2,10 +2,10 @@
 # 
 # 6502asm.pl
 # Created: Sun Jul 25 13:24:14 1999 by tek@wiw.org
-# Revised: Fri Aug  6 21:05:25 1999 by tek@wiw.org
+# Revised: Fri Aug  6 21:21:42 1999 by tek@wiw.org
 # Copyright 1999 Julian E. C. Squires (tek@wiw.org)
 # This program comes with ABSOLUTELY NO WARRANTY.
-# $Id: 6502asm.pl,v 1.1.1.1 1999/08/04 07:06:56 tek Exp $
+# $Id: 6502asm.pl,v 1.2 1999/08/06 23:36:48 tek Exp $
 #
 # Wishlist:
 #   proper handling of labels for zeropage fu?
@@ -96,6 +96,16 @@ my %optable =
     TYA => [ -1, -1, -1, 0x98, -1, -1, -1, -1, -1, -1, -1, -1 ],
 
 # Now, the undocumented ones...
+
+    SLO => [ -1, 0x0F, 0x07, -1, 0x03, 0x13, 0x17, 0x1F, 0x1B, -1, -1, -1 ],
+    RLA => [ -1, 0x2F, 0x27, -1, 0x23, 0x33, 0x37, 0x3F, 0x3B, -1, -1, -1 ],
+    SRE => [ -1, 0x4F, 0x47, -1, 0x43, 0x53, 0x57, 0x5F, 0x5B, -1, -1, -1 ],
+    RRA => [ -1, 0x6F, 0x67, -1, 0x63, 0x73, 0x77, 0x7F, 0x7B, -1, -1, -1 ],
+    SAX => [ -1, 0x8F, 0x87, -1, 0x83, 0x93, 0x97, 0x9F, 0x9B, -1, -1, -1 ],
+
+    LAX => [ -1, 0xAF, 0xA7, -1, 0xA3, 0xB3, 0xB7, 0xBF, 0xBB, -1, -1, -1 ],
+    DCP => [ -1, 0xCF, 0xC7, -1, 0xC3, 0xD3, 0xD7, 0xDF, 0xDB, -1, -1, -1 ],
+    ISB => [ -1, 0xEF, 0xE7, -1, 0xE3, 0xF3, 0xF7, 0xFF, 0xFB, -1, -1, -1 ],
 
   );
 
