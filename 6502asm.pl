@@ -5,20 +5,17 @@
 # Revised: Sat Aug  7 19:18:38 1999 by tek@wiw.org
 # Copyright 1999 Julian E. C. Squires (tek@wiw.org)
 # This program comes with ABSOLUTELY NO WARRANTY.
-# $Id: 6502asm.pl,v 1.3 1999/08/06 23:54:00 tek Exp $
+# $Id: 6502asm.pl,v 1.4 1999/08/08 03:37:16 tek Exp $
 #
 # Wishlist:
 #   proper handling of labels for zeropage fu?
 #   handling of non-hex addresses... (such as -42 for relative, etc)
 #   fix hex idiocy... also, endian of addresses?
 #   checking for bad values
-#   support for seg, org, etc.
+#   add arguments
 #   DASM compatability mode
 #   Z80 support
 #
-# Hacknote: relative ops (like BCC) currently want the same op in
-#           both relative and {zpage, absolute}
-# 
 
 use IO::File;
 use strict;
@@ -28,6 +25,9 @@ my %opm = ( IMMEDIATE => 0, ABSOLUTE => 1, ZPAGE => 2,
 	    ABSX => 7, ABSY => 8, RELATIVE => 9, INDIRECT => 10,
 	    ZPAGEY => 11 );
 
+# Hacknote: relative ops (like BCC) currently want the same op in
+#           both relative and {zpage, absolute}
+# 
 my %optable =
   ( ADC => [ 0x69, 0x6D, 0x65, -1, 0x61, 0x71, 0x75, 0x7D, 0x79, -1, -1, -1 ],
     AND => [ 0x29, 0x2D, 0x25, -1, 0x21, 0x31, 0x35, 0x3D, 0x39, -1, -1, -1 ],
@@ -128,23 +128,32 @@ my %optable =
     JAM => [ -1, -1, -1, 0x02, -1, -1, -1, -1, -1, -1, -1, -1 ],
   );
 
-my %ascommands = { ORG => { },
-		   LINE => { },
-		   BYTE => { },
-		   DB => { },
-		   WORD => { },
-		   DW => { }
-		 };
+my %ascommands = ( 'ORG' => 1,
+		   'LINE' => 1,
+		   'BYTE' => 1,
+		   'DB' => 1,
+		   'WORD' => 1,
+		   'DW' => 1
+		 );
 
 my %reserved = ( A => 1, X => 1, Y => 1, S => 1, P => 1, PC => 1 );
 
 my (%symtable, %symbyline);
 my @secpass;
-my ( $line, $addr, $org ) = ( 0, 0, 0x8000 );
+my ( $line, $addr, $org, $outfile, $infile ) = ( 0, 0, 0x8000, "a.bin", '' );
 
-my $out = new IO::File( "6502.out", "w" );
+$infile = $ARGV[0] or die "Insufficient arguments";
 
-while( <> ) {
+my $in = new IO::File( $infile, "r" ) or die $!;
+if( $infile =~ m/((?=\.s)|(?=\.asm))^/ ) {
+  $outfile = $infile;
+  $outfile =~ s/$1^/.bin/;
+} else {
+  $outfile = $infile . '.bin';
+}
+my $out = new IO::File( $outfile, "w" ) or die $!;
+
+while( $_ = $in->getline() ) {
   $line++;
 
   # Eat comments
@@ -155,7 +164,8 @@ while( <> ) {
   if( $_ =~ /^(\w+)(\s+.*)?$/ ) {
     print "got $1\n";
 
-    if( defined( $reserved{ $1 } ) or defined( $optable{ $1 } ) ) {
+    if( defined( $reserved{ $1 } ) or defined( $optable{ $1 } ) or
+        defined( $ascommands{ $1 } ) ) {
       die "$line:$1: Reserved symbol"
     }
 
@@ -170,7 +180,7 @@ my $tmp;
 
 $line = 0;
 $addr = $org;
-for $_ ( @secpass ) {
+PASS1: for $_ ( @secpass ) {
   $line++;
 
   if( defined( $symbyline{ $line } ) )
@@ -178,7 +188,7 @@ for $_ ( @secpass ) {
       print "defined $symbyline{$line}: ".unpack("H*",pack("n",$addr))."\n";
       $symtable{ $symbyline{ $line } } = $addr }
 
-  $tmp = '$'.unpack("H*",pack("n",$addr));
+  $tmp = "\$".unpack("H*",pack("n",$addr));
   s/\*/$tmp/;
 
   print "$line:".unpack("H*",pack("n",$addr)).": $_\n";
@@ -187,6 +197,17 @@ for $_ ( @secpass ) {
   if( $_ =~ m/^\s*$/ ) { next }
 
   if( $_ !~ m/^\s*(\w+).*$/ ) { die "$line:$_: parse error" }
+  if( defined( $ascommands{ $1 } ) ) {
+    if( $1 eq 'ORG' ) {
+      if( /^\s*(\w+)\s+\$([0-9A-Fa-f]{4}?)\s*$/ ) {
+	$addr = hex( $2 );
+      } else {
+	die "$line:$2: bad argument to ORG"
+      }
+    }
+
+    next PASS1;
+  }
   if( !defined( $optable{ $1 } ) ) { die "$line:$1: bad opcode" }
 
   if( /^\s*(\w+)\s+\#\$([0-9A-Fa-f]{2}?)\s*$/ ) { $addr += 2 }
@@ -210,7 +231,7 @@ for $_ ( @secpass ) {
 
 $line = 0;
 $addr = $org;
-for $_ ( @secpass ) {
+PASS2: for $_ ( @secpass ) {
   $line++;
 
   print "$line:".unpack("H*",pack("n",$addr)).": $_\n";
@@ -219,9 +240,26 @@ for $_ ( @secpass ) {
   if( $_ =~ m/^\s*$/ ) { next }
 
   if( $_ !~ m/^\s*(\w+).*$/ ) { die "$line:$_: parse error" }
+  if( defined( $ascommands{ $1 } ) ) {
+    if( $1 eq 'DB' ) {
+      if( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,2}?)\s*$/ ) {
+	$out->print( pack("C*", hex( $2 ) ) );
+      } else {
+	die "$line:$2: bad argument to DB"
+      }
+    } elsif( $1 eq 'DW' ) {
+      if( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,4}?)\s*$/ ) {
+	$out->print( pack("C*", hex( $2 ) ) );
+      } else {
+	die "$line:$2: bad argument to DW"
+      }
+    }
+
+    next PASS2;
+  }
   if( !defined( $optable{ $1 } ) ) { die "$line:$1: bad opcode" }
 
-  if( /^\s*(\w+)\s+\#\$([0-9A-Fa-f]{2}?)\s*$/ ) {
+  if( /^\s*(\w+)\s+\#\$([0-9A-Fa-f]{1,2}?)\s*$/ ) {
     if( $optable{ $1 }[ $opm{ IMMEDIATE } ] == -1 )
     { die "$line:$1:immediate: bad addressing mode" }
 
@@ -229,9 +267,9 @@ for $_ ( @secpass ) {
     $out->print( chr( $optable{ $1 }[ $opm{ IMMEDIATE } ] ) .
 		 pack("C", hex( $2 ) ) )
 
-  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{4}?)\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,4}?)\s*$/ ) {
     if( $optable{ $1 }[ $opm{ RELATIVE } ] != -1 ) {
-      $_ = pack("C", $2 - ( $addr + 1 ) );
+      $_ = pack("C", hex( $2 ) - ( $addr + 1 ) );
       $addr += 2;
 
     } else {
@@ -259,15 +297,15 @@ for $_ ( @secpass ) {
 
     $out->print( chr( $optable{ $1 }[ $opm{ ABSOLUTE } ] ) . $_ )
 
-  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{2}?)\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,2}?)\s*$/ ) {
     if( $optable{ $1 }[ $opm{ RELATIVE } ] != -1 ) {
-      $_ = pack("C", $2 - ( $addr + 1 ) );
+      $_ = pack("C", hex( $2 ) - ( $addr + 1 ) );
 
     } else {
       if( $optable{ $1 }[ $opm{ ZPAGE } ] == -1 )
       { die "$line:$1:zero-page: bad addressing mode" }
 
-      $_ = pack("c", $2 );
+      $_ = pack("c", hex( $2 ) );
     }
 
     $addr += 2;
@@ -287,7 +325,7 @@ for $_ ( @secpass ) {
     $addr++;
     $out->print( chr( $optable{ $1 }[ $opm{ IMPLIED } ] ) )
 
-  } elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{4}?)\)\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{1,4}?)\)\s*$/ ) {
     if( $optable{ $1 }[ $opm{ INDIRECT } ] == -1 )
     { die "$line:$1:indirect absolute: bad addressing mode" }
 
@@ -303,7 +341,7 @@ for $_ ( @secpass ) {
     $out->print( chr( $optable{ $1 }[ $opm{ INDIRECT } ] ) .
 		 pack("v", $symtable{ $2 } ) )
 
-  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{4}?)\s*,?\s*X\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,4}?)\s*,?\s*X\s*$/ ) {
     if( $optable{ $1 }[ $opm{ ABSX } ] == -1 )
     { die "$line:$1:absolute indexed by X: bad addressing mode" }
 
@@ -319,7 +357,7 @@ for $_ ( @secpass ) {
     $out->print( chr( $optable{ $1 }[ $opm{ ABSX } ] ) .
 		 pack("v", $symtable{ $2 } ) )
 
-  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{4}?)\s*,?\s*Y\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,4}?)\s*,?\s*Y\s*$/ ) {
     if( $optable{ $1 }[ $opm{ ABSY } ] == -1 )
     { die "$line:$1:absolute indexed by Y: bad addressing mode" }
 
@@ -335,7 +373,7 @@ for $_ ( @secpass ) {
     $out->print( chr( $optable{ $1 }[ $opm{ ABSY } ] ) .
 		 pack("v", $symtable{ $2 } ) )
 
-  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{2}?)\s*,\s*?X\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,2}?)\s*,\s*?X\s*$/ ) {
     if( $optable{ $1 }[ $opm{ ZPAGEX } ] == -1 )
     { die "$line:$1:zero-page indexed by X: bad addressing mode" }
 
@@ -343,7 +381,7 @@ for $_ ( @secpass ) {
     $out->print( chr( $optable{ $1 }[ $opm{ ZPAGEX } ] ) .
 		 pack("c", hex( $2 ) ) )
 
-  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{2}?)\s*,\s*?Y\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\$([0-9A-Fa-f]{1,2}?)\s*,\s*?Y\s*$/ ) {
     if( $optable{ $1 }[ $opm{ ZPAGEY } ] == -1 )
     { die "$line:$1:zero-page indexed by Y: bad addressing mode" }
 
@@ -351,7 +389,7 @@ for $_ ( @secpass ) {
     $out->print( chr( $optable{ $1 }[ $opm{ ZPAGEY } ] ) .
 		 pack("c", hex( $2 ) ) )
 
-  } elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{2}?)\s*,?\s*X\)\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{1,2}?)\s*,?\s*X\)\s*$/ ) {
     if( $optable{ $1 }[ $opm{ INDX } ] == -1 )
     { die "$line:$1: indexed indirect by X: bad addressing mode" }
 
@@ -359,7 +397,7 @@ for $_ ( @secpass ) {
     $out->print( chr( $optable{ $1 }[ $opm{ INDX } ] ) .
 		 pack("v", hex( $2 ) ) )
 
-  } elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{2}?)\s*\)\s*,?\s*Y\s*$/ ) {
+  } elsif( /^\s*(\w+)\s+\(\$([0-9A-Fa-f]{1,2}?)\s*\)\s*,?\s*Y\s*$/ ) {
     if( $optable{ $1 }[ $opm{ INDY } ] == -1 )
     { die "$line:$1: indirect indexed by Y: bad addressing mode" }
 
