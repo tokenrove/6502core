@@ -9,6 +9,10 @@
  *         SBC (0xE1) and ISB (0xE3) are currently unimplemented
  *
  * Teknovore/1997,1998
+ * Julian Squires 1999
+ *
+ * $Id$
+ *
  */
 
 #ifndef PALM
@@ -22,9 +26,6 @@
 extern byte_t readmembyte(word_t address);
 extern void writemembyte(word_t address, byte_t data);
 extern void *xmemset(void *, char value, size_t size);
-
-void cpustep(registers_t *registers);
-char setupmachine(registers_t *registers);
 
 #ifdef PALM
 #include "palmcore.h"
@@ -102,7 +103,6 @@ void cpustep(registers_t *registers)
 	  /* Count 6 ticks here */
 	  break;
      case 0x02:			/* Jam! */
-	  xdebug("Jammed at PC=", registers->PC);
 	  break;
      case 0x03:			/* SLO -> Shift left, OR A */
 	  foo = readmembyte(registers->PC+1);
@@ -242,7 +242,6 @@ void cpustep(registers_t *registers)
 	  setbit(registers->P, 0x02, (!registers->A)<<1); /* Zero */
 	  break;
      case 0x12:			/* Jam! */
-	  xdebug("Jammed at PC=", registers->PC);
 	  break;
      case 0x13:			/* SRA */
 	  foo = readmembyte(registers->PC+1);
@@ -393,7 +392,6 @@ void cpustep(registers_t *registers)
 	  /* Count 6 ticks here */
 	  break;
      case 0x22:			/* Jam! */
-	  xdebug("Jammed at PC=", registers->PC);
 	  break;
      case 0x23:			/* RLA -> ROL with AND */
 	  foo = readmembyte(registers->PC+1);
@@ -562,7 +560,6 @@ void cpustep(registers_t *registers)
 	  setbit(registers->P, 0x02, (!registers->A)<<1); /* Zero */
 	  break;
      case 0x32:			/* Jam! */
-	  xdebug("Jammed at PC=", registers->PC);
 	  break;
      case 0x33:			/* RLA */
 	  foo = readmembyte(registers->PC+1);
@@ -713,7 +710,6 @@ void cpustep(registers_t *registers)
 	  setbit(registers->P, 0x02, (!registers->A)<<1); /* Zero */
 	  /* Count 6 ticks here */
      case 0x42:			/* Jam! */
-	  xdebug("Jammed at PC=", registers->PC);
 	  break;
      case 0x43:			/* SRE */
 	  foo = readmembyte(registers->PC+1);
@@ -868,7 +864,6 @@ void cpustep(registers_t *registers)
 	  setbit(registers->P, 0x02, (!registers->A)<<1); /* Zero */
 	  break;
      case 0x52:			/* Jam! */
-	  xdebug("Jammed at PC=", registers->PC);
 	  break;
      case 0x53:			/* SRE */
 	  foo = readmembyte(registers->PC+1);
@@ -1054,7 +1049,6 @@ void cpustep(registers_t *registers)
 	  break;
 
      case 0x62:			/* Jam! */
-	  xdebug("Jammed at PC=", registers->PC);
 	  break;
 
      case 0x63:			/* RRA */
@@ -1187,7 +1181,7 @@ void cpustep(registers_t *registers)
 	  foo = readmembyte(registers->PC+1);
 	  registers->PC+=2;
 
-	  registers->P&=(~0x02)&(~bar);
+	  bar = registers->A+foo;
 
 	  if(registers->P&0x08) { /* Decimal mode */
 	       if(((registers->A&0x0F)+(foo&0x0F)+(registers->P&0x01)) > 9)
@@ -1268,24 +1262,24 @@ void cpustep(registers_t *registers)
 
 	  if(registers->P&0x08) { /* Decimal mode */
 	       if(((registers->A&0x0F)+(foo&0x0F)+(registers->P&0x01)) > 9)
-		    bar+=6;
+		    baz+=6;
 
-	       setbit(registers->P, 0x80, bar&0x80); /* Sign */
+	       setbit(registers->P, 0x80, baz&0x80); /* Sign */
 	       setbit(registers->P, 0x40, (!((registers->A^foo)&0x80) &&
-				((registers->A^bar)&0x80))<<6); /* Overflow */
+				((registers->A^baz)&0x80))<<6); /* Overflow */
 
-	       if(bar > 0x99)
-		    bar += 96;
+	       if(baz > 0x99)
+		    baz += 96;
 
-	       setbit(registers->P, 0x01, (bar>0x99)?1:0); /* Carry */
+	       setbit(registers->P, 0x01, (baz>0x99)?1:0); /* Carry */
 	  } else {
-	       setbit(registers->P, 0x80, bar&0x80); /* Sign */
+	       setbit(registers->P, 0x80, baz&0x80); /* Sign */
 	       setbit(registers->P, 0x40, (!((registers->A^foo)&0x80) &&
-				((registers->A^bar)&0x80))<<6); /* Overflow */
-	       setbit(registers->P, 0x01, (bar>0xFF)?1:0); /* Carry */
+				((registers->A^baz)&0x80))<<6); /* Overflow */
+	       setbit(registers->P, 0x01, (baz>0xFF)?1:0); /* Carry */
 	  }
 
-	  registers->A = baz;
+	  registers->A = baz&0xFF;
 	  /* Count 4 ticks here */
 	  break;
 
@@ -1393,7 +1387,6 @@ void cpustep(registers_t *registers)
 	  break;
 
      case 0x72:			/* Jam! */
-	  xdebug("Jammed at PC=", registers->PC);
 	  break;
 
      case 0x73:			/* RRA */
@@ -1530,24 +1523,24 @@ void cpustep(registers_t *registers)
 
 	  if(registers->P&0x08) { /* Decimal mode */
 	       if(((registers->A&0x0F)+(foo&0x0F)+(registers->P&0x01)) > 9)
-		    bar+=6;
+		    baz+=6;
 
-	       setbit(registers->P, 0x80, bar&0x80); /* Sign */
+	       setbit(registers->P, 0x80, baz&0x80); /* Sign */
 	       setbit(registers->P, 0x40, (!((registers->A^foo)&0x80) &&
-				((registers->A^bar)&0x80))<<6); /* Overflow */
+				((registers->A^baz)&0x80))<<6); /* Overflow */
 
-	       if(bar > 0x99)
-		    bar += 96;
+	       if(baz > 0x99)
+		    baz += 96;
 
-	       setbit(registers->P, 0x01, (bar>0x99)?1:0); /* Carry */
+	       setbit(registers->P, 0x01, (baz>0x99)?1:0); /* Carry */
 	  } else {
-	       setbit(registers->P, 0x80, bar&0x80); /* Sign */
+	       setbit(registers->P, 0x80, baz&0x80); /* Sign */
 	       setbit(registers->P, 0x40, (!((registers->A^foo)&0x80) &&
-				((registers->A^bar)&0x80))<<6); /* Overflow */
-	       setbit(registers->P, 0x01, (bar>0xFF)?1:0); /* Carry */
+				((registers->A^baz)&0x80))<<6); /* Overflow */
+	       setbit(registers->P, 0x01, (baz>0xFF)?1:0); /* Carry */
 	  }
 
-	  registers->A = baz;
+	  registers->A = baz&0xFF;
 	  break;
 
      case 0x7A:			/* NOP */
@@ -1835,7 +1828,6 @@ void cpustep(registers_t *registers)
 	  break;
 
      case 0x92:			/* Jam! */
-	  xdebug("Jammed at PC=", registers->PC);
 	  break;
 
      case 0x93:			/* SHA */
@@ -2191,7 +2183,6 @@ void cpustep(registers_t *registers)
 	  break;
 
      case 0xB2:			/* Jam! */
-	  xdebug("Jammed at PC=", registers->PC);
 	  break;
 
      case 0xB3:			/* LAX */
@@ -2617,7 +2608,6 @@ void cpustep(registers_t *registers)
 	  break;
 
      case 0xD2:			/* Jam! */
-	  xdebug("Jammed at PC=", registers->PC);
 	  break;
 
      case 0xD3:			/* DCP */
@@ -2930,7 +2920,6 @@ void cpustep(registers_t *registers)
 	  break;
 
      case 0xF2:			/* Jam! */
-	  xdebug("Jammed at PC=", registers->PC);
 	  break;
 
      case 0xF3:			/* ISB */
@@ -3015,7 +3004,6 @@ void cpustep(registers_t *registers)
 
 	  /* No other values could occur */
      default:			/* ... */
-	  xdebug("Something has deeply broken at PC=", registers->PC-1);
 	  break;
 
      }

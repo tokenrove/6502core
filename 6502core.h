@@ -1,3 +1,6 @@
+/*
+ * $Id$
+ */
 #ifndef _6502CORE_H
 #define _6502CORE_H
 
@@ -14,5 +17,8 @@ typedef struct registers_t {
      byte_t A;			/* Accumulator */
      byte_t X, Y;		/* Index registers */
 } registers_t;
+
+extern void cpustep(registers_t *registers);
+extern char setupmachine(registers_t *registers);
 
 #endif /* !_6502CORE_H */
